@@ -1,12 +1,24 @@
 package net.murasakiyamaimo.Lisatoprogram.compiler.semantics;
 
 import net.murasakiyamaimo.Lisatoprogram.compiler.ast.*;
+import net.murasakiyamaimo.Lisatoprogram.tools.Parameters;
+
+import java.util.Map;
+import java.util.Stack;
+
+import static net.murasakiyamaimo.Lisatoprogram.tools.Tools.inferType;
 
 public class SemanticAnalyzer {
-    private SymbolTable symbolTable = new SymbolTable();
+    // SymbolTableのスタック管理
+    private final Stack<SymbolTable> scopeStack = new Stack<>();
 
-    public SymbolTable getSymbolTable() {
-        return symbolTable;
+    public SemanticAnalyzer() {
+        // グローバルスコープの作成とプッシュ
+        scopeStack.push(new SymbolTable());
+    }
+
+    private SymbolTable currentScope() {
+        return scopeStack.peek();
     }
 
     // プログラム全体のASTを解析
@@ -16,39 +28,169 @@ public class SemanticAnalyzer {
         }
     }
 
-    // AST(何かわからない)ときの解析
+    // AST解析
     public void analyze(StatementNode statement) throws SemanticException {
-        if (statement instanceof VariableDeclarationNode) {
-            System.out.println("var");
+        if (statement instanceof ComparisonExpressionNode) {
+            analyze((ComparisonExpressionNode) statement);
+        } else if (statement instanceof VariableDeclarationNode) {
             analyze((VariableDeclarationNode) statement);
+        } else if (statement instanceof VariableAssignmentNode) {
+            analyze((VariableAssignmentNode) statement);
         } else if (statement instanceof PrintStatementNode) {
-            System.out.println("print");
             analyze((PrintStatementNode) statement);
-        } else if (statement instanceof PilikeStatementNode) {
-            System.out.println("for");
-            analyze((PilikeStatementNode) statement);
+        } else if (statement instanceof ForStatementNode) {
+            analyze((ForStatementNode) statement);
+        } else if (statement instanceof IfStatementNode) {
+            analyze((IfStatementNode) statement);
+        } else if (statement instanceof FunctionDeclarationNode) {
+            analyze((FunctionDeclarationNode) statement);
+        } else if (statement instanceof FunctionCallNode) {
+            analyze((FunctionCallNode) statement);
         }
     }
 
-    private void analyze(PilikeStatementNode node) throws  SemanticException {
-        System.out.println("analyze Pilike");
+    // 関数定義
+    private void analyze(FunctionDeclarationNode node) throws SemanticException {
+        if (currentScope().containsFunction(node.getLiteral().getName())) {
+            throw new SemanticException("関数 " + node.getLiteral().getName() + "は既に定義されています。");
+        }
+        scopeStack.push(new SymbolTable());
+        for (Map.Entry<String, TypeNode> entry : node.getLiteral().getParameterNode().get().entries()) {
+            String key = entry.getKey();
+            TypeNode value = entry.getValue();
+            currentScope().defineVariable(key, value);
+        }
+        for (StatementNode statementNode : node.getLiteral().getStatementNode()) {
+            analyze(statementNode);
+        }
+        TypeNode inferredReturnType = inferType(node.getLiteral().getReturnLiteral(), currentScope());
+        TypeNode returnType = node.getLiteral().getReturnType();
+        if (returnType != null && !returnType.isCompatibleWith(inferredReturnType)) {
+            throw new SemanticException("返り値は" + returnType.getJavaTypeName() + "である必要があります。");
+        }
+        scopeStack.pop();
+        currentScope().defineFunction(node.getLiteral().getName(), node.getLiteral());
+    }
+
+    // 関数呼び出し
+    private void analyze(FunctionCallNode node) throws SemanticException {
+        if (!currentScope().containsFunction(node.getName())) {
+            throw new SemanticException("関数 " + node.getName() + "は定義されていません。");
+        }
+        FunctionLiteralNode functionLiteralNode = currentScope().getFunction(node.getName());
+        Parameters<String, TypeNode> parameters = functionLiteralNode.getParameterNode().get();
+        if (functionLiteralNode.getParameterNode().size() != node.getSize()) {
+            throw new SemanticException(functionLiteralNode.getParameterNode().size() + "個の引数が必要ですが、" + node.getSize() + "個見つかりました。");
+        }
+
+        for (int i = 0; i < parameters.size(); i++) {
+            Map.Entry<String, TypeNode> entry = parameters.get(i);
+            TypeNode inferredType = inferType(node.getArg(i), currentScope());
+            if (!inferredType.isCompatibleWith(entry.getValue())) {
+                throw new SemanticException("引数 " + entry.getKey() + "は" + entry.getValue() + "である必要があります。");
+            }
+        }
+    }
+
+    // 式
+    private void analyze(ComparisonExpressionNode node) throws SemanticException {
+        if (node.getLeft() instanceof IdentifierNode) {
+            String varName = ((IdentifierNode) node.getLeft()).getName();
+            if (!currentScope().containsVariable(varName)) {
+                throw new SemanticException("Asapi sapollata pasta '" + varName + "' kalivisku kittummusope.");
+            }
+        }
+
+        if (node.getRight() instanceof IdentifierNode) {
+            String varName = ((IdentifierNode) node.getRight()).getName();
+            if (!currentScope().containsVariable(varName)) {
+                throw new SemanticException("Asapi sapollata pasta '" + varName + "' kalivisku kittummusope.");
+            }
+        }
+
+        TypeNode leftType = inferType(node.getLeft(), currentScope());
+        TypeNode rightType = inferType(node.getRight(), currentScope());
+
+        if (!leftType.isCompatibleWith(rightType)) {
+            throw new SemanticException("型エラー: 比較式の両辺の型が一致しません。");
+        }
+    }
+
+    // If文
+    private void analyze(IfStatementNode node) throws SemanticException {
+        TypeNode conditionType = inferType(node.getCondition(), currentScope());
+        if (!(conditionType instanceof BooleanTypeNode)) {
+            throw new SemanticException("条件式はbooleanである必要があります");
+        }
+
+        // if内
+        scopeStack.push(new SymbolTable(currentScope()));
+        for (StatementNode statement : node.getThenBody()) {
+            analyze(statement);
+        }
+        scopeStack.pop();
+
+        // else if
+        for (ElseIfStatementNode elseIfStatement : node.getElseIfStatements()) {
+            scopeStack.push(new SymbolTable(currentScope()));
+            TypeNode elseIfConditionType = inferType(elseIfStatement.getCondition(), currentScope());
+            if (!(elseIfConditionType instanceof BooleanTypeNode)) {
+                throw new SemanticException("else ifの条件式はboolean型である必要があります。");
+            }
+
+            for (StatementNode statement : elseIfStatement.getBody()) {
+                analyze(statement);
+            }
+            scopeStack.pop();
+        }
+        // else
+        if (!node.getElseBody().isEmpty()) {
+            scopeStack.push(new SymbolTable(currentScope()));
+            for (StatementNode statement : node.getElseBody()) {
+                analyze(statement);
+            }
+            scopeStack.pop();
+        }
+    }
+
+    // 変数代入
+    private void analyze(VariableAssignmentNode node) throws SemanticException {
+        String variableName = node.getVariableName();
+        ExpressionNode value = node.getValue();
+
+        if (!currentScope().containsVariable(variableName)) {
+            throw new SemanticException("Asapi jamusopi miniko pasta '" + variableName + "' kalivisku killemmusope.");
+        }
+
+        TypeNode declaredType = currentScope().getVariableType(variableName);
+        TypeNode assignedType = inferType(value, currentScope());
+
+        if (assignedType != null && !declaredType.isCompatibleWith(assignedType)) {
+            throw new SemanticException("Japitasi tosaka " + variableName + " kikkate vas tosaka " + assignedType.getJavaTypeName());
+        }
+    }
+
+    // for文
+    private void analyze(ForStatementNode node) throws SemanticException {
         String counterVariableName = node.getCounterVariableName();
         ExpressionNode loopCountExpr = node.getLoopCount();
 
-        TypeNode inferredLoopCountType = inferType(loopCountExpr);
+        scopeStack.push(new SymbolTable(currentScope()));
+
+        TypeNode inferredLoopCountType = inferType(loopCountExpr, currentScope());
         if (!(inferredLoopCountType instanceof IntegerTypeNode)) {
             throw new SemanticException("型エラー: ループは整数回である必要があります");
         }
 
-        if (symbolTable.containsVariable(counterVariableName)) {
+        if (currentScope().containsVariable(counterVariableName)) {
             throw new SemanticException("変数 '" + counterVariableName + "' は既に定義されています。");
         }
-        symbolTable.defineVariable(counterVariableName, new IntegerTypeNode());
+        currentScope().defineVariable(counterVariableName, new IntegerTypeNode());
 
         for (StatementNode statement : node.getBody()) {
             analyze(statement);
         }
-        symbolTable.removeVariable(counterVariableName);
+        scopeStack.pop();
     }
 
     // 変数宣言ノードの意味解析
@@ -57,22 +199,17 @@ public class SemanticAnalyzer {
         TypeNode declaredType = node.getVariableType();
         ExpressionNode initialValue = node.getValue();
 
-        // 変数が既に定義されていないかチェック
-        if (symbolTable.containsVariable(variableName)) {
+        if (currentScope().containsVariable(variableName)) {
             throw new SemanticException("変数 '" + variableName + "' は既に定義されています。");
         }
 
-        // 初期値の型を推論
-        TypeNode inferredInitialType = inferType(initialValue);
-
-        // 型チェック: 宣言された型と初期値の型が互換性があるか
+        TypeNode inferredInitialType = inferType(initialValue, currentScope());
         if (inferredInitialType != null && !declaredType.isCompatibleWith(inferredInitialType)) {
-            throw new SemanticException("型不一致エラー: 初期値の型 '" + inferredInitialType.getJavaTypeName() +
-                    "' は宣言された型 '" + declaredType.getJavaTypeName() + "' と互換性がありません。");
+            throw new SemanticException("Japitasi tosaka: '" + inferredInitialType.getJavaTypeName() +
+                    "' kikkate vas tosaka '" + declaredType.getJavaTypeName());
         }
 
-        // 変数をシンボルテーブルに登録
-        symbolTable.defineVariable(variableName, declaredType);
+        currentScope().defineVariable(variableName, declaredType);
     }
 
     // print文ノードの意味解析
@@ -81,32 +218,10 @@ public class SemanticAnalyzer {
         ExpressionNode expr = node.getExpression();
         if (expr instanceof IdentifierNode) {
             String varName = ((IdentifierNode) expr).getName();
-            if (!symbolTable.containsVariable(varName)) {
-                throw new SemanticException("未定義の変数 '" + varName + "' が使用されています。");
+            if (!currentScope().containsVariable(varName)) {
+                throw new SemanticException("Asapi sapollata pasta '" + varName + "' kalivisku kittummusope.");
             }
-            // 型チェックはここでは不要だが、より厳密な言語では必要になる場合がある
         }
         // リテラルの場合は常に有効
-    }
-
-    // 式ノードから型を推論するヘルパーメソッド
-    private TypeNode inferType(ExpressionNode expr) throws SemanticException {
-        if (expr instanceof StringLiteralNode) {
-            return new StringTypeNode();
-        } else if (expr instanceof IntegerLiteralNode) {
-            return new IntegerTypeNode();
-        } else if (expr instanceof BooleanLiteralNode) {
-            return new BooleanTypeNode();
-        } else if (expr instanceof IdentifierNode) {
-            // 識別子の場合はシンボルテーブルから型を取得
-            String varName = ((IdentifierNode) expr).getName();
-            TypeNode type = symbolTable.getVariableType(varName);
-            if (type == null) {
-                throw new SemanticException("未定義の変数 '" + varName + "' が使用されています。");
-            }
-            return type;
-        }
-        // 他の式タイプもここに追加
-        return null; // 未知の式タイプ
     }
 }

@@ -3,12 +3,12 @@ package net.murasakiyamaimo.Lisatoprogram.compiler.ast;
 import java.util.ArrayList;
 import java.util.List;
 
-public class PilikeStatementNode implements StatementNode {
+public class ForStatementNode implements StatementNode {
     private final String counterVariableName;
     private final ExpressionNode loopCount;
     private final List<StatementNode> body;
 
-    public PilikeStatementNode(String counterVariableName, ExpressionNode loopCount) {
+    public ForStatementNode(String counterVariableName, ExpressionNode loopCount) {
         this.counterVariableName = counterVariableName;
         this.loopCount = loopCount;
         this.body = new ArrayList<>();

@@ -1,5 +1,7 @@
 package net.murasakiyamaimo.Lisatoprogram;
 
+import com.google.googlejavaformat.java.Formatter;
+import com.google.googlejavaformat.java.FormatterException;
 import net.murasakiyamaimo.Lisatoprogram.compiler.ast.ProgramNode;
 import net.murasakiyamaimo.Lisatoprogram.compiler.codegen.JavaCodeGenerator;
 import net.murasakiyamaimo.Lisatoprogram.compiler.semantics.SemanticAnalyzer;
@@ -40,7 +42,7 @@ public class Main {
             e.printStackTrace();
         }
 
-        System.out.println("--- あなたの言語のソースコード ---");
+        System.out.println("--- 莉語のソースコード ---");
         System.out.println(sourceCode);
         System.out.println("-------------------------------------\n");
 
@@ -71,18 +73,21 @@ public class Main {
             semanticAnalyzer.analyze(programAst); // AST全体を解析
 
             // 4. Javaコード生成
-            JavaCodeGenerator codeGenerator = new JavaCodeGenerator(semanticAnalyzer.getSymbolTable());
-            String generatedJavaCode = codeGenerator.generate(programAst);
-
-            String fullJavaProgram = codeGenerator.getFullJavaProgram(generatedJavaCode);
+            JavaCodeGenerator codeGenerator = new JavaCodeGenerator();
+            String generatedJavaCode;
+            try {
+                generatedJavaCode = new Formatter().formatSource(codeGenerator.generate(programAst));
+            } catch (FormatterException e) {
+                throw new RuntimeException(e);
+            }
 
             System.out.println("--- 生成されたJavaコード ---");
-            System.out.println(fullJavaProgram);
+            System.out.println(generatedJavaCode);
             System.out.println("-------------------------------------\n");
 
             // 5. Javaコードのコンパイルと実行
             System.out.println("--- 生成されたJavaコードの実行結果 ---");
-            compileAndRun(fullJavaProgram, "Main");
+            compileAndRun(generatedJavaCode);
             System.out.println("-------------------------------------\n");
 
         } catch (SemanticException e) {
@@ -97,7 +102,7 @@ public class Main {
     }
 
     // 生成されたJavaコードをコンパイルし、実行するユーティリティメソッド
-    private static void compileAndRun(String javaCode, String className) throws Exception {
+    private static void compileAndRun(String javaCode) throws Exception {
         JavaCompiler compiler = ToolProvider.getSystemJavaCompiler();
         if (compiler == null) {
             throw new IllegalStateException("JDKがインストールされていません。JREではコンパイルできません。");
@@ -106,7 +111,7 @@ public class Main {
         Path tempDir = null;
         try {
             tempDir = Files.createTempDirectory("my_compiler_temp");
-            Path sourceFile = tempDir.resolve(className + ".java");
+            Path sourceFile = tempDir.resolve("Main" + ".java");
             Files.writeString(sourceFile, javaCode, StandardCharsets.UTF_8);
 
             String[] compileArgs = {
@@ -119,12 +124,12 @@ public class Main {
             int compileResult = compiler.run(null, null, new PrintStream(err), compileArgs);
 
             if (compileResult != 0) {
-                throw new RuntimeException("生成されたJavaコードのコンパイルに失敗しました:\n" + err.toString());
+                throw new RuntimeException("生成されたJavaコードのコンパイルに失敗しました:\n" + err);
             }
 
             // 実行
             URLClassLoader classLoader = URLClassLoader.newInstance(new URL[] { tempDir.toUri().toURL() });
-            Class<?> compiledClass = Class.forName(className, true, classLoader);
+            Class<?> compiledClass = Class.forName("Main", true, classLoader);
             Method mainMethod = compiledClass.getMethod("main", String[].class);
             mainMethod.invoke(null, (Object) new String[0]); // mainメソッドを実行
 
